@@ -118,3 +118,15 @@ func TestNewDuressAlert_SetsTypeAndTimestamp(t *testing.T) {
 		t.Errorf("expected Timestamp=%v, got %v", now, a.Timestamp)
 	}
 }
+
+func TestNewLivenessAlert_SetsTypeAndTimestamp(t *testing.T) {
+	now := time.Now()
+	a := NewLivenessAlert(now)
+	if a.Type != Liveness {
+		t.Errorf("expected Type=%q, got %q", Liveness, a.Type)
+	}
+	if !a.Timestamp.Equal(now) {
+		t.Errorf("expected Timestamp=%v, got %v", now, a.Timestamp)
+	}
+}
+

@@ -29,8 +29,16 @@ import (
 // format can carry other alert kinds later without a breaking change.
 type Type string
 
-// Duress is the only alert type currently defined.
+// Duress is signaled when the owner enters their duress passphrase.
 const Duress Type = "duress"
+
+// Liveness is signaled on every ordinary successful check-in (including a
+// duress one — see NewDuressAlert). It's what lets a guardian detect
+// total silence, not just an active duress signal: if no Liveness alert
+// arrives within checkin.Interval+GracePeriod, the owner is overdue by
+// the same definition their own device would compute, but observed
+// independently by guardians rather than relying on that device at all.
+const Liveness Type = "liveness"
 
 // Alert is the plaintext payload, sealed before it ever leaves the device.
 type Alert struct {
@@ -61,6 +69,13 @@ func NewDuressAlert(now time.Time) Alert {
 	return Alert{Type: Duress, Timestamp: now}
 }
 
+// NewLivenessAlert builds a Liveness-type Alert stamped with the given
+// time. Sent on every ordinary check-in so guardians can detect an owner
+// going silent, not just an active duress signal.
+func NewLivenessAlert(now time.Time) Alert {
+	return Alert{Type: Liveness, Timestamp: now}
+}
+
 // Open decrypts a sealed alert using the guardian's key pair. This runs on
 // the guardian's side, never on the relay or the owner's device.
 func Open(sealed []byte, guardianPubKey, guardianPrivKey *[32]byte) (Alert, error) {
@@ -75,3 +90,4 @@ func Open(sealed []byte, guardianPubKey, guardianPrivKey *[32]byte) (Alert, erro
 	}
 	return a, nil
 }
+
