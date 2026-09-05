@@ -27,3 +27,27 @@ built, following the same practice as Aegis's THREAT_MODEL.md.
 - What constitutes "active proof of life" (mechanism TBD)
 - Check-in interval and grace period
 - How trigger state hands off into Sentinel's escrow
+
+## Accepted gaps (deliberate deferrals)
+
+- **Relay has no sender authentication.** Alerts are anonymously sealed by
+  design (no sender identity to check), so the relay cannot distinguish a
+  genuine alert from spam aimed at a known guardian public key. A forged
+  blob only wastes a guardian's attention on a failed decryption — it
+  cannot be read or forged as real content — but this remains an
+  unhardened spam/DoS surface.
+- **No TLS on the relay.** Needed before any real deployment: even though
+  payloads are opaque, plain HTTP still leaks metadata (which guardian ID
+  is being posted to or polled, and when) to anyone observing the
+  connection.
+- **Guardian public-key exchange is trust-on-first-use, not cryptographically
+  enforced.** `orizu-guardian keygen` asks the guardian to share their
+  public key with the owner "over a channel you already trust," but
+  nothing in the code verifies that channel or detects a substituted key.
+  An attacker who intercepts the exchange and swaps in their own public
+  key could receive that guardian's alerts undetected. This is a process
+  discipline, not a guarantee.
+- **Duress alert delivery has no retry.** If the relay is unreachable at
+  the moment of a duress check-in, the alert is silently lost — errors go
+  to stderr only (to preserve the no-visible-difference property on
+  stdout), with no queue or retry mechanism.
