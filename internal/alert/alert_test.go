@@ -5,11 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"crypto/rand"
+
 	"golang.org/x/crypto/nacl/box"
 )
 
 func TestSealOpen_RoundTrip(t *testing.T) {
-	guardianPub, guardianPriv, err := box.GenerateKey(nil)
+	guardianPub, guardianPriv, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("key generation failed: %v", err)
 	}
@@ -36,11 +38,11 @@ func TestSealOpen_RoundTrip(t *testing.T) {
 }
 
 func TestOpen_FailsWithWrongGuardianKey(t *testing.T) {
-	guardianPub, _, err := box.GenerateKey(nil)
+	guardianPub, _, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("key generation failed: %v", err)
 	}
-	_, wrongPriv, err := box.GenerateKey(nil)
+	_, wrongPriv, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("key generation failed: %v", err)
 	}
@@ -60,7 +62,7 @@ func TestOpen_FailsWithWrongGuardianKey(t *testing.T) {
 }
 
 func TestOpen_FailsOnCorruptedCiphertext(t *testing.T) {
-	guardianPub, guardianPriv, err := box.GenerateKey(nil)
+	guardianPub, guardianPriv, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("key generation failed: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestOpen_FailsOnCorruptedCiphertext(t *testing.T) {
 }
 
 func TestSeal_ProducesDifferentCiphertextEachTime(t *testing.T) {
-	guardianPub, _, err := box.GenerateKey(nil)
+	guardianPub, _, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("key generation failed: %v", err)
 	}
