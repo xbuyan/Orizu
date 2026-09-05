@@ -1,6 +1,7 @@
 package checkin
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -171,3 +172,59 @@ func TestIsOverdue_DuressCheckInAlsoResetsDeadline(t *testing.T) {
 		t.Fatal("expected not overdue — a duress check-in must reset the deadline identically to a normal one")
 	}
 }
+
+func TestMarshalUnmarshalJSON_RoundTrip(t *testing.T) {
+	created := time.Now().Truncate(time.Second) // JSON round-trips to second precision
+	original, err := New("normal-pass", "duress-pass", created)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+
+	var restored CheckIn
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("UnmarshalJSON failed: %v", err)
+	}
+
+	if !restored.LastCheckIn().Equal(created) {
+		t.Errorf("expected LastCheckIn=%v, got %v", created, restored.LastCheckIn())
+	}
+
+	// The restored CheckIn must still accept the original passphrases —
+	// proof that the hashes themselves, not just the timestamp, survived
+	// the round trip.
+	if _, err := restored.Record("normal-pass", created.Add(time.Hour)); err != nil {
+		t.Errorf("restored CheckIn rejected the original normal passphrase: %v", err)
+	}
+}
+
+func TestMarshalUnmarshalJSON_PreservesDuressDetection(t *testing.T) {
+	created := time.Now().Truncate(time.Second)
+	original, err := New("normal-pass", "duress-pass", created)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+
+	var restored CheckIn
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("UnmarshalJSON failed: %v", err)
+	}
+
+	result, err := restored.Record("duress-pass", created.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.DuressDetected {
+		t.Fatal("expected restored CheckIn to still detect the duress passphrase after round trip")
+	}
+}
+

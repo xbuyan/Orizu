@@ -16,6 +16,7 @@
 package checkin
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -124,3 +125,39 @@ func (c *CheckIn) IsOverdue(now time.Time) bool {
 	deadline := c.lastCheckIn.Add(Interval).Add(GracePeriod)
 	return now.After(deadline)
 }
+
+// checkInJSON is the on-disk shape. It is safe to persist as-is: both
+// hashes are bcrypt output, never plaintext passphrases. This lets a
+// caller (e.g. cmd/orizu) save and reload a CheckIn's state across
+// process restarts without this package needing any filesystem or
+// network dependency itself.
+type checkInJSON struct {
+	PassphraseHash       []byte    `json:"passphrase_hash"`
+	DuressPassphraseHash []byte    `json:"duress_passphrase_hash"`
+	LastCheckIn          time.Time `json:"last_check_in"`
+}
+
+// MarshalJSON implements json.Marshaler, serializing the (already-hashed)
+// credential state and last check-in time.
+func (c *CheckIn) MarshalJSON() ([]byte, error) {
+	return json.Marshal(checkInJSON{
+		PassphraseHash:       c.passphraseHash,
+		DuressPassphraseHash: c.duressPassphraseHash,
+		LastCheckIn:          c.lastCheckIn,
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler, restoring a CheckIn
+// previously produced by MarshalJSON. It does not re-derive or validate
+// the hashes — it trusts the persisted state was written by this package.
+func (c *CheckIn) UnmarshalJSON(data []byte) error {
+	var aux checkInJSON
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	c.passphraseHash = aux.PassphraseHash
+	c.duressPassphraseHash = aux.DuressPassphraseHash
+	c.lastCheckIn = aux.LastCheckIn
+	return nil
+}
+
