@@ -1,0 +1,62 @@
+package main
+
+import (
+	"fmt"
+
+	"github.com/xbuyan/orizu/internal/alert"
+	"github.com/xbuyan/orizu/internal/relay"
+)
+
+// runPoll fetches every alert waiting at the relay for this guardian and
+// decrypts each one. Unlike the owner's checkin output, there is no
+// concealment concern here — the guardian is the intended, trusted
+// recipient, so a duress alert is reported plainly. That plainness is the
+// entire point of this tool.
+func runPoll() error {
+	kf, err := loadKeyFile()
+	if err != nil {
+		return err
+	}
+
+	pubKey, err := decode32(kf.PubKey)
+	if err != nil {
+		return fmt.Errorf("stored public key is invalid: %w", err)
+	}
+	privKey, err := decode32(kf.PrivKey)
+	if err != nil {
+		return fmt.Errorf("stored private key is invalid: %w", err)
+	}
+
+	client := relay.NewClient(kf.RelayURL)
+	blobs, err := client.Fetch(kf.ID)
+	if err != nil {
+		return fmt.Errorf("fetching from relay: %w", err)
+	}
+
+	if len(blobs) == 0 {
+		fmt.Println("No alerts.")
+		return nil
+	}
+
+	fmt.Printf("%d alert(s):\n", len(blobs))
+	for i, blob := range blobs {
+		a, err := alert.Open(blob, pubKey, privKey)
+		if err != nil {
+			// Consistent with the relay's documented spam/DoS gap: an
+			// unauthenticated blob that isn't meant for this key (spam, or
+			// corruption) simply fails to decrypt. Reported, not fatal —
+			// one bad entry shouldn't hide genuine alerts alongside it.
+			fmt.Printf("  [%d] could not decrypt (%v) — possibly not intended for you, or corrupted\n", i+1, err)
+			continue
+		}
+		switch a.Type {
+		case alert.Duress:
+			fmt.Printf("  [%d] *** DURESS ALERT *** at %s\n", i+1, a.Timestamp.Format("2006-01-02 15:04:05 MST"))
+		default:
+			fmt.Printf("  [%d] alert type %q at %s\n", i+1, a.Type, a.Timestamp.Format("2006-01-02 15:04:05 MST"))
+		}
+	}
+
+	return nil
+}
+
