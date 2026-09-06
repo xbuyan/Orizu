@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 	"time"
@@ -127,6 +128,48 @@ func TestNewLivenessAlert_SetsTypeAndTimestamp(t *testing.T) {
 	}
 	if !a.Timestamp.Equal(now) {
 		t.Errorf("expected Timestamp=%v, got %v", now, a.Timestamp)
+	}
+}
+
+func TestNewShareAlert_SetsTypeTimestampAndData(t *testing.T) {
+	now := time.Now()
+	data := []byte("serialized-shamir-share")
+	a := NewShareAlert(data, now)
+	if a.Type != Share {
+		t.Errorf("expected Type=%q, got %q", Share, a.Type)
+	}
+	if !a.Timestamp.Equal(now) {
+		t.Errorf("expected Timestamp=%v, got %v", now, a.Timestamp)
+	}
+	if !bytes.Equal(a.Data, data) {
+		t.Errorf("expected Data=%q, got %q", data, a.Data)
+	}
+}
+
+func TestSealOpen_RoundTripPreservesShareData(t *testing.T) {
+	guardianPub, guardianPriv, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("key generation failed: %v", err)
+	}
+
+	data := []byte{0x01, 0x02, 0x03, 0xFF, 0x00}
+	original := NewShareAlert(data, time.Now().Truncate(time.Second))
+
+	sealed, err := Seal(original, guardianPub)
+	if err != nil {
+		t.Fatalf("Seal failed: %v", err)
+	}
+
+	opened, err := Open(sealed, guardianPub, guardianPriv)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	if opened.Type != Share {
+		t.Errorf("expected Type=%q, got %q", Share, opened.Type)
+	}
+	if !bytes.Equal(opened.Data, data) {
+		t.Errorf("expected Data=%v, got %v", data, opened.Data)
 	}
 }
 

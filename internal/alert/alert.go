@@ -40,10 +40,25 @@ const Duress Type = "duress"
 // independently by guardians rather than relying on that device at all.
 const Liveness Type = "liveness"
 
+// Share carries one guardian's Shamir share, delivered once during
+// initial setup (see cmd/orizu's distribute step). Unlike Duress and
+// Liveness, which are recurring status signals with no secret content,
+// a Share alert's Data field carries part of the actual secret being
+// protected. It receives no different treatment from the relay's point
+// of view — the same anonymous sealed box gives the same confidentiality
+// guarantee regardless of alert type — but callers should be more
+// deliberate about retention: a Share alert should generally be fetched,
+// recorded by the guardian, and not left sitting on the relay
+// indefinitely, unlike a routine Liveness ping.
+const Share Type = "share"
+
 // Alert is the plaintext payload, sealed before it ever leaves the device.
+// Data is only populated for Share alerts; it's empty for Duress and
+// Liveness, which carry no payload beyond their type and timestamp.
 type Alert struct {
 	Type      Type      `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
+	Data      []byte    `json:"data,omitempty"`
 }
 
 // Sentinel errors returned by this package.
@@ -74,6 +89,13 @@ func NewDuressAlert(now time.Time) Alert {
 // going silent, not just an active duress signal.
 func NewLivenessAlert(now time.Time) Alert {
 	return Alert{Type: Liveness, Timestamp: now}
+}
+
+// NewShareAlert builds a Share-type Alert carrying one Shamir share's
+// serialized bytes as Data. Delivered once per guardian during setup, not
+// repeated like Duress or Liveness.
+func NewShareAlert(data []byte, now time.Time) Alert {
+	return Alert{Type: Share, Timestamp: now, Data: data}
 }
 
 // Open decrypts a sealed alert using the guardian's key pair. This runs on

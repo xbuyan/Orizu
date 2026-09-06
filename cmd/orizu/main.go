@@ -25,6 +25,8 @@ func main() {
 		err = runCheckIn()
 	case "status":
 		err = runStatus()
+	case "distribute":
+		err = runDistribute()
 	default:
 		usage()
 		os.Exit(1)
@@ -37,6 +39,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: orizu <init|checkin|status>")
+	fmt.Fprintln(os.Stderr, "Usage: orizu <init|checkin|status|distribute>")
 }
 

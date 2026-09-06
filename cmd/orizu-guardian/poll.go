@@ -1,24 +1,29 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/xbuyan/orizu/internal/alert"
 	"github.com/xbuyan/orizu/internal/relay"
+	"github.com/xbuyan/orizu/internal/shamir"
 	"github.com/xbuyan/orizu/internal/trigger"
 )
 
 // runPoll fetches every alert waiting at the relay for this guardian,
-// decrypts each one, and reports overdue status computed from the most
-// recent Liveness alert seen. Unlike the owner's checkin output, there is
-// no concealment concern here — the guardian is the intended, trusted
-// recipient, so both a duress alert and an overdue status are reported
-// plainly. That plainness is the entire point of this tool.
+// decrypts each one, persists any Share alert (see saveShare), and
+// reports overdue status computed from the most recent Liveness alert
+// seen. Unlike the owner's checkin output, there is no concealment
+// concern here — the guardian is the intended, trusted recipient, so
+// duress, share receipt, and overdue status are all reported plainly.
+// That plainness is the entire point of this tool.
 //
 // Overdue detection here is observation-only: it never combines Shamir
 // shares or initiates anything automatically. What to do about an overdue
-// or duress signal remains the guardian's decision — see
+// or duress signal — including whether and when to actually combine
+// shares with the other two guardians — remains a human decision. See
 // internal/trigger's package doc.
 func runPoll() error {
 	kf, err := loadKeyFile()
@@ -64,6 +69,12 @@ func runPoll() error {
 			fmt.Printf("  [%d] *** DURESS ALERT *** at %s\n", i+1, a.Timestamp.Format("2006-01-02 15:04:05 MST"))
 		case alert.Liveness:
 			fmt.Printf("  [%d] liveness check-in at %s\n", i+1, a.Timestamp.Format("2006-01-02 15:04:05 MST"))
+		case alert.Share:
+			if err := saveShare(a); err != nil {
+				fmt.Printf("  [%d] received a share but failed to save it: %v\n", i+1, err)
+			} else {
+				fmt.Printf("  [%d] Shamir share received and saved at %s\n", i+1, a.Timestamp.Format("2006-01-02 15:04:05 MST"))
+			}
 		default:
 			fmt.Printf("  [%d] alert type %q at %s\n", i+1, a.Type, a.Timestamp.Format("2006-01-02 15:04:05 MST"))
 		}
@@ -82,5 +93,43 @@ func runPoll() error {
 	}
 
 	return nil
+}
+
+// sharePath is where this guardian's received Shamir share is persisted.
+func sharePath() (string, error) {
+	dir, err := guardianDir()
+	if err != nil {
+		return "", err
+	}
+	return dir + "/share.json", nil
+}
+
+// saveShare decodes a's Data as a shamir.Share and writes it to disk.
+// Refuses to overwrite an existing saved share — receiving a second Share
+// alert for what should be a one-time setup event is unusual enough to
+// warrant a human looking at it rather than silently replacing what may
+// still be the correct, currently-relied-upon share.
+func saveShare(a alert.Alert) error {
+	var share shamir.Share
+	if err := json.Unmarshal(a.Data, &share); err != nil {
+		return fmt.Errorf("decoding share payload: %w", err)
+	}
+
+	path, err := sharePath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("a share is already saved at %s — refusing to overwrite; "+
+			"if the owner genuinely redistributed shares, confirm with them before replacing it", path)
+	}
+
+	data, err := json.MarshalIndent(share, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding share: %w", err)
+	}
+	// 0600: this file holds actual secret material — one guardian's
+	// fraction of the protected secret.
+	return os.WriteFile(path, data, 0o600)
 }
 

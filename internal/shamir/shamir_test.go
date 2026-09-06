@@ -40,10 +40,31 @@ func TestSplit_RejectsEmptySecret(t *testing.T) {
 	}
 }
 
-// TestCombine_AnyTwoOfThreeReconstruct is the core correctness property:
-// every pairwise combination of 2 shares out of 3 must reconstruct the
-// exact original secret.
-func TestCombine_AnyTwoOfThreeReconstruct(t *testing.T) {
+// TestCombine_AllThreeSharesReconstruct is the core correctness property
+// for Orizu's 3-of-3 threshold: combining all three shares must reproduce
+// the exact original secret. Unlike Kinga's 2-of-3, no partial subset of
+// shares is sufficient here — see TestCombine_RejectsFewerThanThreeShares.
+func TestCombine_AllThreeSharesReconstruct(t *testing.T) {
+	secret := []byte("0123456789ABCDEF")
+	shares, err := Split(secret)
+	if err != nil {
+		t.Fatalf("Split() returned unexpected error: %v", err)
+	}
+
+	got, err := Combine(shares)
+	if err != nil {
+		t.Fatalf("Combine(all 3 shares) returned unexpected error: %v", err)
+	}
+	if !bytes.Equal(got, secret) {
+		t.Fatalf("Combine(all 3 shares) = %x, want %x", got, secret)
+	}
+}
+
+// TestCombine_RejectsFewerThanThreeShares proves that under Orizu's 3-of-3
+// threshold, any two guardians acting alone — without the third — cannot
+// reconstruct the secret. This is the property the whole 3-of-3 design
+// decision rests on.
+func TestCombine_RejectsFewerThanThreeShares(t *testing.T) {
 	secret := []byte("0123456789ABCDEF")
 	shares, err := Split(secret)
 	if err != nil {
@@ -52,12 +73,9 @@ func TestCombine_AnyTwoOfThreeReconstruct(t *testing.T) {
 
 	pairs := [][2]int{{0, 1}, {0, 2}, {1, 2}}
 	for _, p := range pairs {
-		got, err := Combine([]Share{shares[p[0]], shares[p[1]]})
-		if err != nil {
-			t.Fatalf("Combine(shares[%d], shares[%d]) returned unexpected error: %v", p[0], p[1], err)
-		}
-		if !bytes.Equal(got, secret) {
-			t.Fatalf("Combine(shares[%d], shares[%d]) = %x, want %x", p[0], p[1], got, secret)
+		_, err := Combine([]Share{shares[p[0]], shares[p[1]]})
+		if err == nil {
+			t.Fatalf("Combine(shares[%d], shares[%d]) succeeded with only 2 of 3 shares — 3-of-3 threshold violated", p[0], p[1])
 		}
 	}
 }
@@ -73,22 +91,28 @@ func TestCombine_RejectsWrongShareCount(t *testing.T) {
 		t.Fatalf("Split() returned unexpected error: %v", err)
 	}
 
+	t.Run("zero shares", func(t *testing.T) {
+		_, err := Combine(nil)
+		if err == nil {
+			t.Fatal("Combine(0 shares) succeeded, want error")
+		}
+	})
 	t.Run("one share", func(t *testing.T) {
 		_, err := Combine(shares[:1])
 		if err == nil {
 			t.Fatal("Combine(1 share) succeeded, want error")
 		}
 	})
-	t.Run("three shares", func(t *testing.T) {
-		_, err := Combine(shares)
+	t.Run("two shares", func(t *testing.T) {
+		_, err := Combine(shares[:2])
 		if err == nil {
-			t.Fatal("Combine(3 shares) succeeded, want error — threshold is 2, not 3")
+			t.Fatal("Combine(2 shares) succeeded, want error — threshold is 3, not 2")
 		}
 	})
-	t.Run("zero shares", func(t *testing.T) {
-		_, err := Combine(nil)
-		if err == nil {
-			t.Fatal("Combine(0 shares) succeeded, want error")
+	t.Run("three shares succeeds", func(t *testing.T) {
+		_, err := Combine(shares)
+		if err != nil {
+			t.Fatalf("Combine(3 shares) returned unexpected error: %v — threshold is exactly 3", err)
 		}
 	})
 }
@@ -115,8 +139,8 @@ func TestCombine_OneShareRevealsNothing(t *testing.T) {
 // TestCombine_DetectsCorruptedShare proves Combine doesn't crash on a
 // corrupted share, but also documents (per Part 3.6 of the design) that
 // Combine alone cannot detect the corruption — it will still return some
-// output. Integrity detection happens one layer up, via BIP39 checksum
-// verification, not here. This test exists to make that boundary explicit
+// output, given the full threshold count. Integrity detection happens one
+// layer up, not here. This test exists to make that boundary explicit
 // rather than accidentally assumed.
 func TestCombine_DetectsCorruptedShare(t *testing.T) {
 	secret := []byte("0123456789ABCDEF")
@@ -127,9 +151,9 @@ func TestCombine_DetectsCorruptedShare(t *testing.T) {
 
 	corrupted := shares[0]
 	corrupted.YVal = append([]byte(nil), corrupted.YVal...) // copy before mutating
-	corrupted.YVal[0] ^= 0xFF                                 // flip bits in first byte
+	corrupted.YVal[0] ^= 0xFF                                // flip bits in first byte
 
-	got, err := Combine([]Share{corrupted, shares[1]})
+	got, err := Combine([]Share{corrupted, shares[1], shares[2]})
 	if err != nil {
 		t.Fatalf("Combine() with corrupted share returned unexpected error: %v (expected: no error, but wrong output)", err)
 	}
@@ -145,7 +169,8 @@ func TestCombine_DetectsCorruptedShare(t *testing.T) {
 func TestCombine_RejectsMismatchedShareLengths(t *testing.T) {
 	a := Share{X: 1, YVal: []byte{1, 2, 3}}
 	b := Share{X: 2, YVal: []byte{1, 2}}
-	_, err := Combine([]Share{a, b})
+	c := Share{X: 3, YVal: []byte{1, 2, 3}}
+	_, err := Combine([]Share{a, b, c})
 	if err == nil {
 		t.Fatal("Combine() with mismatched YVal lengths succeeded, want error")
 	}
@@ -157,7 +182,8 @@ func TestCombine_RejectsMismatchedShareLengths(t *testing.T) {
 func TestCombine_RejectsDuplicateXCoordinate(t *testing.T) {
 	a := Share{X: 1, YVal: []byte{1, 2, 3}}
 	b := Share{X: 1, YVal: []byte{4, 5, 6}}
-	_, err := Combine([]Share{a, b})
+	c := Share{X: 2, YVal: []byte{7, 8, 9}}
+	_, err := Combine([]Share{a, b, c})
 	if err == nil {
 		t.Fatal("Combine() with duplicate x-coordinates succeeded, want error")
 	}
@@ -189,3 +215,4 @@ func TestGFArithmetic_KnownValues(t *testing.T) {
 		}
 	}
 }
+

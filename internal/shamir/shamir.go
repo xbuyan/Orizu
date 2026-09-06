@@ -7,7 +7,10 @@ import (
 
 const (
 	shareCount = 3 //n: total shares generated
-	threshold  = 2 // k: shares required to reconstruct
+	threshold  = 3 // k: shares required to reconstruct — Orizu deliberately
+	// uses 3-of-3, not Kinga's 2-of-3, for the reasons recorded in
+	// THREAT_MODEL.md: a dead-man's-switch treats a false/coerced trigger
+	// as a worse failure mode than requiring full guardian consensus.
 )
 
 // share is one point (x, y) on the secret polynomial, for a single byte
@@ -172,3 +175,4 @@ func Combine(shares []Share) ([]byte, error) {
 
 	return secret, nil
 }
+
