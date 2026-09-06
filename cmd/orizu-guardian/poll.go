@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/xbuyan/orizu/internal/alert"
+	"github.com/xbuyan/orizu/internal/recovery"
 	"github.com/xbuyan/orizu/internal/relay"
-	"github.com/xbuyan/orizu/internal/shamir"
 	"github.com/xbuyan/orizu/internal/trigger"
 )
 
@@ -23,8 +23,8 @@ import (
 // Overdue detection here is observation-only: it never combines Shamir
 // shares or initiates anything automatically. What to do about an overdue
 // or duress signal — including whether and when to actually combine
-// shares with the other two guardians — remains a human decision. See
-// internal/trigger's package doc.
+// shares with the other two guardians (see `orizu-guardian recover`) —
+// remains a human decision. See internal/trigger's package doc.
 func runPoll() error {
 	kf, err := loadKeyFile()
 	if err != nil {
@@ -95,7 +95,8 @@ func runPoll() error {
 	return nil
 }
 
-// sharePath is where this guardian's received Shamir share is persisted.
+// sharePath is where this guardian's received share payload (share +
+// fingerprint) is persisted.
 func sharePath() (string, error) {
 	dir, err := guardianDir()
 	if err != nil {
@@ -104,14 +105,14 @@ func sharePath() (string, error) {
 	return dir + "/share.json", nil
 }
 
-// saveShare decodes a's Data as a shamir.Share and writes it to disk.
-// Refuses to overwrite an existing saved share — receiving a second Share
-// alert for what should be a one-time setup event is unusual enough to
-// warrant a human looking at it rather than silently replacing what may
-// still be the correct, currently-relied-upon share.
+// saveShare decodes a's Data as a recovery.SharePayload and writes it to
+// disk. Refuses to overwrite an existing saved share — receiving a second
+// Share alert for what should be a one-time setup event is unusual enough
+// to warrant a human looking at it rather than silently replacing what
+// may still be the correct, currently-relied-upon share.
 func saveShare(a alert.Alert) error {
-	var share shamir.Share
-	if err := json.Unmarshal(a.Data, &share); err != nil {
+	var payload recovery.SharePayload
+	if err := json.Unmarshal(a.Data, &payload); err != nil {
 		return fmt.Errorf("decoding share payload: %w", err)
 	}
 
@@ -124,12 +125,12 @@ func saveShare(a alert.Alert) error {
 			"if the owner genuinely redistributed shares, confirm with them before replacing it", path)
 	}
 
-	data, err := json.MarshalIndent(share, "", "  ")
+	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding share: %w", err)
 	}
 	// 0600: this file holds actual secret material — one guardian's
-	// fraction of the protected secret.
+	// fraction of the protected secret, plus its (non-secret) fingerprint.
 	return os.WriteFile(path, data, 0o600)
 }
 

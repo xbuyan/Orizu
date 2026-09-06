@@ -75,12 +75,24 @@ func saveKeyFile(kf *keyFile) error {
 	return nil
 }
 
+// stdinReader is a single, shared bufio.Reader over os.Stdin, used by
+// every promptVisible call in a given command invocation.
+//
+// This matters more than it looks: a bufio.Reader created fresh per call
+// buffers greedily from the underlying stream on its first Read — if
+// stdin delivers multiple lines back-to-back (piped input, an automation
+// script, or just fast typing landing in the same read), a throwaway
+// reader can consume a later prompt's line into a buffer that then gets
+// discarded when the reader goes out of scope, causing the next prompt to
+// see an unexpected EOF. Sharing one reader across all prompts in a
+// command avoids losing that buffered-but-unconsumed input.
+var stdinReader = bufio.NewReader(os.Stdin)
+
 // promptVisible reads a line of plain (non-secret) input, echoed normally.
 // Used for the guardian ID and relay URL, neither of which is sensitive.
 func promptVisible(label string) (string, error) {
 	fmt.Fprint(os.Stderr, label)
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
+	line, err := stdinReader.ReadString('\n')
 	if err != nil {
 		return "", fmt.Errorf("reading input: %w", err)
 	}

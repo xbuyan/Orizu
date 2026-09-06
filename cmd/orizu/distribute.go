@@ -10,6 +10,7 @@ import (
 
 	"github.com/xbuyan/orizu/internal/alert"
 	"github.com/xbuyan/orizu/internal/config"
+	"github.com/xbuyan/orizu/internal/recovery"
 	"github.com/xbuyan/orizu/internal/relay"
 	"github.com/xbuyan/orizu/internal/shamir"
 )
@@ -84,12 +85,21 @@ func runDistribute() error {
 		return fmt.Errorf("internal error: %d shares for %d guardians — these must match", len(shares), len(cfg.Guardians))
 	}
 
+	// Computed once, before the secret goes out of scope, and embedded in
+	// every guardian's payload. Safe to distribute openly: a SHA-256
+	// fingerprint reveals nothing about the secret itself, but lets a
+	// future recovery ceremony detect a corrupted or mismatched share
+	// instead of silently reconstructing wrong bytes — see
+	// internal/recovery's package doc for why this matters.
+	fingerprint := recovery.Fingerprint(secret)
+
 	client := relay.NewClient(cfg.RelayURL)
 	now := time.Now()
 	var sent []string
 
 	for i, guardian := range cfg.Guardians {
-		shareData, err := json.Marshal(shares[i])
+		payload := recovery.SharePayload{Share: shares[i], Fingerprint: fingerprint}
+		shareData, err := json.Marshal(payload)
 		if err != nil {
 			return fmt.Errorf("encoding share for %s: %w", guardian.ID, err)
 		}

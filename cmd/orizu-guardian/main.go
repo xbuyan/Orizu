@@ -25,6 +25,8 @@ func main() {
 		err = runKeygen()
 	case "poll":
 		err = runPoll()
+	case "recover":
+		err = runRecover()
 	default:
 		usage()
 		os.Exit(1)
@@ -37,6 +39,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: orizu-guardian <keygen|poll>")
+	fmt.Fprintln(os.Stderr, "Usage: orizu-guardian <keygen|poll|recover>")
 }
 
