@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/xbuyan/orizu/internal/alert"
 	"github.com/xbuyan/orizu/internal/config"
 	"github.com/xbuyan/orizu/internal/relay"
+	"github.com/xbuyan/orizu/internal/retryqueue"
 )
 
 // runCheckIn prompts for a passphrase, records the check-in, and notifies
@@ -17,6 +19,13 @@ import (
 // guardians detect total silence, not just an active duress signal, and
 // it means the network traffic pattern is identical either way, so it
 // cannot itself be used to infer that a duress event occurred.
+//
+// Before sending the new alert, this also opportunistically flushes any
+// previously-failed notifications still sitting in the retry queue (see
+// internal/retryqueue) — a real fix for a real gap: a check-in that fails
+// to reach the relay used to be silently lost, which could eventually
+// produce a false OVERDUE signal for guardians even though the owner
+// genuinely checked in.
 //
 // The printed output is identical whether the check-in was normal or
 // under duress: anyone watching the screen (a coercer included) must not
@@ -49,28 +58,33 @@ func runCheckIn() error {
 
 	// Best-effort: a relay/network failure here must not change what is
 	// printed, or the screen output itself would leak information to
-	// anyone watching. Failures are swallowed from the user-visible path;
-	// see the design note on the retry gap below.
+	// anyone watching. Failures are queued for retry rather than lost —
+	// see notifyGuardians.
 	notifyGuardians(result.DuressDetected, now)
 
 	fmt.Println("Checked in.")
 	return nil
 }
 
+func retryQueueDir() (string, error) {
+	dir, err := orizuDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "retry-queue"), nil
+}
+
 // notifyGuardians seals and posts an alert to every configured guardian —
-// a Duress alert if duress is true, otherwise a Liveness alert. Errors are
-// logged to stderr only, never surfaced to stdout — see runCheckIn — since
-// a coercer watching the primary terminal output must see no difference,
-// while stderr still gives the owner an after-the-fact record if they
-// check logs later.
+// a Duress alert if duress is true, otherwise a Liveness alert. Before
+// sending, it first attempts to flush any previously-queued failed
+// notifications, so a transient outage self-heals on the next check-in
+// rather than requiring the owner to notice and act.
 //
-// Known limitation, not yet addressed: if the relay is unreachable at
-// check-in time (e.g. no network), this alert is silently lost with no
-// retry. Since Liveness alerts now drive guardian-side overdue detection
-// (see internal/trigger), a lost Liveness ping risks a guardian eventually
-// seeing a false "overdue" status even though the owner genuinely checked
-// in — this is a real cost of not yet having a retry queue, not just a
-// cosmetic gap.
+// Delivery errors (for both the flush and the new alert) are logged to
+// stderr only, never surfaced to stdout — see runCheckIn — since a
+// coercer watching the primary terminal output must see no difference.
+// A failed new alert is enqueued for the next attempt rather than
+// discarded, closing the gap that previously existed here.
 func notifyGuardians(duress bool, now time.Time) {
 	cfgPath, err := configPath()
 	if err != nil {
@@ -83,6 +97,28 @@ func notifyGuardians(duress bool, now time.Time) {
 		return
 	}
 
+	queueDir, err := retryQueueDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "guardian notify: could not resolve retry queue path:", err)
+		return
+	}
+	queue, err := retryqueue.NewQueue(queueDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "guardian notify: could not open retry queue:", err)
+		return
+	}
+
+	client := relay.NewClient(cfg.RelayURL)
+
+	// Opportunistic self-healing: attempt to deliver anything left over
+	// from a previous failure before sending today's alert.
+	if flushResult, err := queue.Flush(client, now); err != nil {
+		fmt.Fprintln(os.Stderr, "guardian notify: retry queue flush failed:", err)
+	} else if flushResult.Delivered > 0 || flushResult.Dropped > 0 {
+		fmt.Fprintf(os.Stderr, "guardian notify: retry queue — delivered %d, dropped %d (too old), %d still pending\n",
+			flushResult.Delivered, flushResult.Dropped, flushResult.Remaining)
+	}
+
 	var a alert.Alert
 	if duress {
 		a = alert.NewDuressAlert(now)
@@ -90,7 +126,6 @@ func notifyGuardians(duress bool, now time.Time) {
 		a = alert.NewLivenessAlert(now)
 	}
 
-	client := relay.NewClient(cfg.RelayURL)
 	for _, guardian := range cfg.Guardians {
 		sealed, err := alert.Seal(a, &guardian.PubKey)
 		if err != nil {
@@ -98,7 +133,10 @@ func notifyGuardians(duress bool, now time.Time) {
 			continue
 		}
 		if err := client.Post(guardian.ID, sealed); err != nil {
-			fmt.Fprintln(os.Stderr, "guardian notify: notifying", guardian.ID, "failed:", err)
+			fmt.Fprintln(os.Stderr, "guardian notify: notifying", guardian.ID, "failed, queuing for retry:", err)
+			if qerr := queue.Enqueue(guardian.ID, sealed, now); qerr != nil {
+				fmt.Fprintln(os.Stderr, "guardian notify: FAILED TO QUEUE for", guardian.ID, "— this notification is lost:", qerr)
+			}
 			continue
 		}
 	}
