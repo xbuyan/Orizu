@@ -89,11 +89,15 @@ type evidencePubKeyFile struct {
 	PubKey string `json:"pub_key"` // base64
 }
 
-// runDistribute generates a fresh NaCl keypair, persists the PUBLIC half
-// for the owner's own ongoing use, splits the PRIVATE half into exactly 3
-// Shamir shares (Orizu's 3-of-3 threshold — see internal/shamir), and
-// delivers one share to each configured guardian via the relay, sealed to
-// their public key exactly like a Duress or Liveness alert.
+// generateAndDistributeKeypair generates a fresh NaCl keypair, splits the
+// PRIVATE half into exactly 3 Shamir shares (Orizu's 3-of-3 threshold —
+// see internal/shamir), and delivers one share to each configured
+// guardian via the relay, sealed to their public key exactly like a
+// Duress or Liveness alert. Returns the PUBLIC key for the caller to
+// persist — this function itself never writes anything to disk, so both
+// `orizu distribute` (first-time setup) and `orizu rotate` (replacing an
+// existing keypair) can share this core logic while handling the
+// marker-file bookkeeping differently around it.
 //
 // This is an asymmetric design deliberately chosen to resolve a real
 // conflict: the owner needs an ongoing way to encrypt new evidence as
@@ -104,6 +108,65 @@ type evidencePubKeyFile struct {
 // the PUBLIC key forever (harmless — sealed-box encryption to a pubkey
 // needs no secret), while the PRIVATE key is split 3-of-3 among guardians
 // and never touches disk on the owner's machine at all.
+func generateAndDistributeKeypair(cfg *config.Config) (pubKey [32]byte, sent []string, err error) {
+	pub, privKey, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		return pubKey, nil, fmt.Errorf("generating keypair: %w", err)
+	}
+	pubKey = *pub
+
+	shares, err := shamir.Split(privKey[:])
+	if err != nil {
+		return pubKey, nil, fmt.Errorf("splitting private key: %w", err)
+	}
+	if len(shares) != len(cfg.Guardians) {
+		return pubKey, nil, fmt.Errorf("internal error: %d shares for %d guardians — these must match", len(shares), len(cfg.Guardians))
+	}
+
+	// Computed once, before the private key goes out of scope, and
+	// embedded in every guardian's payload. Safe to distribute openly: a
+	// SHA-256 fingerprint reveals nothing about the key itself, but lets
+	// a future recovery ceremony detect a corrupted or mismatched share
+	// instead of silently reconstructing the wrong key — see
+	// internal/recovery's package doc for why this matters.
+	fingerprint := recovery.Fingerprint(privKey[:])
+
+	client := relay.NewClient(cfg.RelayURL, cfg.PostToken)
+	now := time.Now()
+
+	for i, guardian := range cfg.Guardians {
+		payload := recovery.SharePayload{Share: shares[i], Fingerprint: fingerprint}
+		shareData, err := json.Marshal(payload)
+		if err != nil {
+			return pubKey, sent, fmt.Errorf("encoding share for %s: %w", guardian.ID, err)
+		}
+
+		a := alert.NewShareAlert(shareData, now)
+		sealed, err := alert.Seal(a, &guardian.PubKey)
+		if err != nil {
+			return pubKey, sent, fmt.Errorf("sealing share for %s: %w", guardian.ID, err)
+		}
+
+		if err := client.Post(guardian.ID, sealed); err != nil {
+			// Unlike a routine Liveness ping, a failed Share delivery is
+			// NOT swallowed — the owner needs to know a guardian didn't
+			// receive their share, since without it the 3-of-3 threshold
+			// can never be satisfied. Stop rather than silently
+			// half-distribute.
+			return pubKey, sent, fmt.Errorf("delivering share to %s failed: %w (already sent to: %v — do not assume they can be combined; consider re-running once the issue is fixed, after checking whether already-sent guardians should discard their share)", guardian.ID, err, sent)
+		}
+		sent = append(sent, guardian.ID)
+	}
+
+	// privKey and shares fall out of scope here — this is the only place
+	// the private key ever exists on the owner's machine, and this
+	// function never writes it to disk.
+	return pubKey, sent, nil
+}
+
+// runDistribute is the first-time setup path: refuses to run if a
+// keypair was already distributed (see `orizu rotate` for replacing an
+// existing one deliberately).
 func runDistribute() error {
 	markerPath, err := distributionMarkerPath()
 	if err != nil {
@@ -113,8 +176,7 @@ func runDistribute() error {
 		return fmt.Errorf("a keypair was already distributed (see %s) — refusing to generate and "+
 			"send a new one, which would orphan the private-key shares guardians already hold and "+
 			"invalidate the public key already in use for encryption. "+
-			"If you genuinely need to redo this, remove that file first and understand "+
-			"that all three guardians must discard their old share", markerPath)
+			"Use `orizu rotate` if you genuinely need to replace it", markerPath)
 	}
 
 	cfgPath, err := configPath()
@@ -130,58 +192,10 @@ func runDistribute() error {
 		return err
 	}
 
-	pubKey, privKey, err := box.GenerateKey(rand.Reader)
+	pubKey, sent, err := generateAndDistributeKeypair(cfg)
 	if err != nil {
-		return fmt.Errorf("generating keypair: %w", err)
+		return err
 	}
-
-	shares, err := shamir.Split(privKey[:])
-	if err != nil {
-		return fmt.Errorf("splitting private key: %w", err)
-	}
-	if len(shares) != len(cfg.Guardians) {
-		return fmt.Errorf("internal error: %d shares for %d guardians — these must match", len(shares), len(cfg.Guardians))
-	}
-
-	// Computed once, before the private key goes out of scope, and
-	// embedded in every guardian's payload. Safe to distribute openly: a
-	// SHA-256 fingerprint reveals nothing about the key itself, but lets
-	// a future recovery ceremony detect a corrupted or mismatched share
-	// instead of silently reconstructing the wrong key — see
-	// internal/recovery's package doc for why this matters.
-	fingerprint := recovery.Fingerprint(privKey[:])
-
-	client := relay.NewClient(cfg.RelayURL, cfg.PostToken)
-	now := time.Now()
-	var sent []string
-
-	for i, guardian := range cfg.Guardians {
-		payload := recovery.SharePayload{Share: shares[i], Fingerprint: fingerprint}
-		shareData, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("encoding share for %s: %w", guardian.ID, err)
-		}
-
-		a := alert.NewShareAlert(shareData, now)
-		sealed, err := alert.Seal(a, &guardian.PubKey)
-		if err != nil {
-			return fmt.Errorf("sealing share for %s: %w", guardian.ID, err)
-		}
-
-		if err := client.Post(guardian.ID, sealed); err != nil {
-			// Unlike a routine Liveness ping, a failed Share delivery is
-			// NOT swallowed — the owner needs to know a guardian didn't
-			// receive their share, since without it the 3-of-3 threshold
-			// can never be satisfied. Stop rather than silently
-			// half-distribute.
-			return fmt.Errorf("delivering share to %s failed: %w (already sent to: %v — do not assume they can be combined; consider re-running once the issue is fixed, after checking whether already-sent guardians should discard their share)", guardian.ID, err, sent)
-		}
-		sent = append(sent, guardian.ID)
-	}
-
-	// privKey and shares fall out of scope here — this is the only place
-	// the private key ever exists on the owner's machine, and this
-	// function never writes it to disk. Only pubKey is persisted below.
 
 	pubKeyPath, err := evidencePubKeyPath()
 	if err != nil {
@@ -198,7 +212,7 @@ func runDistribute() error {
 		return fmt.Errorf("writing public key: %w", err)
 	}
 
-	marker := distributionMarker{DistributedAt: now, GuardianIDs: sent}
+	marker := distributionMarker{DistributedAt: time.Now(), GuardianIDs: sent}
 	data, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding distribution marker: %w", err)

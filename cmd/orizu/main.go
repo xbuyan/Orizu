@@ -29,6 +29,8 @@ func main() {
 		err = runDistribute()
 	case "retry":
 		err = runRetry()
+	case "rotate":
+		err = runRotate()
 	default:
 		usage()
 		os.Exit(1)
@@ -41,6 +43,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: orizu <init|checkin|status|distribute|retry>")
+	fmt.Fprintln(os.Stderr, "Usage: orizu <init|checkin|status|distribute|retry|rotate>")
 }
 
