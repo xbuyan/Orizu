@@ -111,7 +111,7 @@ func runDistribute() error {
 	// internal/recovery's package doc for why this matters.
 	fingerprint := recovery.Fingerprint(privKey[:])
 
-	client := relay.NewClient(cfg.RelayURL)
+	client := relay.NewClient(cfg.RelayURL, cfg.PostToken)
 	now := time.Now()
 	var sent []string
 

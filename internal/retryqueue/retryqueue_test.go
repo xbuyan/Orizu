@@ -15,7 +15,7 @@ func newTestRelay(t *testing.T) (*httptest.Server, *relay.Store) {
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
-	server := relay.NewServer(store)
+	server := relay.NewServer(store, "test-token")
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
 	return ts, store
@@ -44,7 +44,7 @@ func TestFlush_DeliversQueuedItemAndRemovesIt(t *testing.T) {
 	}
 
 	ts, store := newTestRelay(t)
-	client := relay.NewClient(ts.URL)
+	client := relay.NewClient(ts.URL, "test-token")
 
 	result, err := q.Flush(client, now)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestFlush_LeavesItemQueuedOnContinuedFailure(t *testing.T) {
 	}
 
 	// Point at an address nothing is listening on.
-	client := relay.NewClient("http://127.0.0.1:1")
+	client := relay.NewClient("http://127.0.0.1:1", "test-token")
 
 	result, err := q.Flush(client, now)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestFlush_RecoversAfterRelayComesBack(t *testing.T) {
 	}
 
 	// First flush: relay is down.
-	deadClient := relay.NewClient("http://127.0.0.1:1")
+	deadClient := relay.NewClient("http://127.0.0.1:1", "test-token")
 	result1, err := q.Flush(deadClient, now)
 	if err != nil {
 		t.Fatalf("first Flush failed: %v", err)
@@ -130,7 +130,7 @@ func TestFlush_RecoversAfterRelayComesBack(t *testing.T) {
 
 	// Relay comes back — this is the scenario the whole package exists for.
 	ts, store := newTestRelay(t)
-	liveClient := relay.NewClient(ts.URL)
+	liveClient := relay.NewClient(ts.URL, "test-token")
 	result2, err := q.Flush(liveClient, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("second Flush failed: %v", err)
@@ -159,7 +159,7 @@ func TestFlush_DropsItemsOlderThanMaxAge(t *testing.T) {
 
 	// Even with a live relay, an item past MaxAge should be dropped, not delivered.
 	ts, store := newTestRelay(t)
-	client := relay.NewClient(ts.URL)
+	client := relay.NewClient(ts.URL, "test-token")
 
 	pastMaxAge := queuedAt.Add(MaxAge + time.Hour)
 	result, err := q.Flush(client, pastMaxAge)
@@ -192,7 +192,7 @@ func TestFlush_HandlesMultipleItemsForDifferentGuardians(t *testing.T) {
 	}
 
 	ts, store := newTestRelay(t)
-	client := relay.NewClient(ts.URL)
+	client := relay.NewClient(ts.URL, "test-token")
 
 	result, err := q.Flush(client, now)
 	if err != nil {

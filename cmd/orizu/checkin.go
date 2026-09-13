@@ -108,7 +108,7 @@ func notifyGuardians(duress bool, now time.Time) {
 		return
 	}
 
-	client := relay.NewClient(cfg.RelayURL)
+	client := relay.NewClient(cfg.RelayURL, cfg.PostToken)
 
 	// Opportunistic self-healing: attempt to deliver anything left over
 	// from a previous failure before sending today's alert.

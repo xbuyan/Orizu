@@ -11,11 +11,11 @@ func TestClient_PostSucceedsAndStoresBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
-	server := NewServer(store)
+	server := NewServer(store, testPostToken)
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
-	client := NewClient(ts.URL)
+	client := NewClient(ts.URL, testPostToken)
 	if err := client.Post("guardian-1", []byte("client-sent-blob")); err != nil {
 		t.Fatalf("Post failed: %v", err)
 	}
@@ -29,23 +29,38 @@ func TestClient_PostSucceedsAndStoresBlob(t *testing.T) {
 	}
 }
 
+func TestClient_PostFailsWithWrongToken(t *testing.T) {
+	store, err := NewStore(t.TempDir(), DefaultExpiry)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	server := NewServer(store, testPostToken)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "wrong-token")
+	if err := client.Post("guardian-1", []byte("blob")); err == nil {
+		t.Fatal("expected error when client's token doesn't match the server's")
+	}
+}
+
 func TestClient_PostFailsOnInvalidGuardianID(t *testing.T) {
 	store, err := NewStore(t.TempDir(), DefaultExpiry)
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
-	server := NewServer(store)
+	server := NewServer(store, testPostToken)
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
-	client := NewClient(ts.URL)
+	client := NewClient(ts.URL, testPostToken)
 	if err := client.Post("has spaces", []byte("blob")); err == nil {
 		t.Fatal("expected error for invalid guardian id")
 	}
 }
 
 func TestClient_PostFailsWhenRelayUnreachable(t *testing.T) {
-	client := NewClient("http://127.0.0.1:1") // deliberately unreachable
+	client := NewClient("http://127.0.0.1:1", testPostToken) // deliberately unreachable
 	if err := client.Post("guardian-1", []byte("blob")); err == nil {
 		t.Fatal("expected error when relay is unreachable")
 	}
@@ -56,7 +71,7 @@ func TestClient_FetchReturnsDecodedBlobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
-	server := NewServer(store)
+	server := NewServer(store, testPostToken)
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
@@ -64,7 +79,8 @@ func TestClient_FetchReturnsDecodedBlobs(t *testing.T) {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	client := NewClient(ts.URL)
+	// Fetch needs no token at all — an empty string is fine.
+	client := NewClient(ts.URL, "")
 	blobs, err := client.Fetch("guardian-1")
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
@@ -79,11 +95,11 @@ func TestClient_FetchEmptyForUnknownGuardian(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
-	server := NewServer(store)
+	server := NewServer(store, testPostToken)
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
-	client := NewClient(ts.URL)
+	client := NewClient(ts.URL, "")
 	blobs, err := client.Fetch("never-seen")
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
@@ -98,11 +114,11 @@ func TestClient_PostThenFetchEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
-	server := NewServer(store)
+	server := NewServer(store, testPostToken)
 	ts := httptest.NewServer(server.Handler())
 	defer ts.Close()
 
-	client := NewClient(ts.URL)
+	client := NewClient(ts.URL, testPostToken)
 	if err := client.Post("guardian-1", []byte("round-trip-blob")); err != nil {
 		t.Fatalf("Post failed: %v", err)
 	}

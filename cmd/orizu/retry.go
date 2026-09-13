@@ -32,7 +32,7 @@ func runRetry() error {
 		return fmt.Errorf("opening retry queue: %w", err)
 	}
 
-	client := relay.NewClient(cfg.RelayURL)
+	client := relay.NewClient(cfg.RelayURL, cfg.PostToken)
 	result, err := queue.Flush(client, time.Now())
 	if err != nil {
 		return fmt.Errorf("flushing retry queue: %w", err)

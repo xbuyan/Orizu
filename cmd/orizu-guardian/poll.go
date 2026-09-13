@@ -40,7 +40,9 @@ func runPoll() error {
 		return fmt.Errorf("stored private key is invalid: %w", err)
 	}
 
-	client := relay.NewClient(kf.RelayURL)
+	// Empty token: guardians only ever Fetch, never Post, and Fetch
+	// requires no authentication — see relay.Server's package doc.
+	client := relay.NewClient(kf.RelayURL, "")
 	blobs, err := client.Fetch(kf.ID)
 	if err != nil {
 		return fmt.Errorf("fetching from relay: %w", err)
@@ -133,4 +135,5 @@ func saveShare(a alert.Alert) error {
 	// fraction of the protected secret, plus its (non-secret) fingerprint.
 	return os.WriteFile(path, data, 0o600)
 }
+
 

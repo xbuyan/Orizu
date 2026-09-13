@@ -29,6 +29,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 	pk := validPubKeyBase64()
 	path := writeConfig(t, `{
 		"relay_url": "https://relay.example.com",
+		"post_token": "shared-secret-token",
 		"guardians": [
 			{"id": "guardian-1", "pub_key": "`+pk+`"},
 			{"id": "guardian-2", "pub_key": "`+pk+`"},
@@ -43,6 +44,9 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if cfg.RelayURL != "https://relay.example.com" {
 		t.Errorf("unexpected RelayURL: %s", cfg.RelayURL)
 	}
+	if cfg.PostToken != "shared-secret-token" {
+		t.Errorf("unexpected PostToken: %s", cfg.PostToken)
+	}
 	if len(cfg.Guardians) != 3 {
 		t.Fatalf("expected 3 guardians, got %d", len(cfg.Guardians))
 	}
@@ -55,6 +59,7 @@ func TestLoad_RejectsMissingRelayURL(t *testing.T) {
 	pk := validPubKeyBase64()
 	path := writeConfig(t, `{
 		"relay_url": "",
+		"post_token": "shared-secret-token",
 		"guardians": [
 			{"id": "g1", "pub_key": "`+pk+`"},
 			{"id": "g2", "pub_key": "`+pk+`"},
@@ -67,10 +72,28 @@ func TestLoad_RejectsMissingRelayURL(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsMissingPostToken(t *testing.T) {
+	pk := validPubKeyBase64()
+	path := writeConfig(t, `{
+		"relay_url": "https://relay.example.com",
+		"post_token": "",
+		"guardians": [
+			{"id": "g1", "pub_key": "`+pk+`"},
+			{"id": "g2", "pub_key": "`+pk+`"},
+			{"id": "g3", "pub_key": "`+pk+`"}
+		]
+	}`)
+
+	if _, err := Load(path); err != ErrMissingPostToken {
+		t.Fatalf("expected ErrMissingPostToken, got %v", err)
+	}
+}
+
 func TestLoad_RejectsWrongGuardianCount(t *testing.T) {
 	pk := validPubKeyBase64()
 	path := writeConfig(t, `{
 		"relay_url": "https://relay.example.com",
+		"post_token": "shared-secret-token",
 		"guardians": [
 			{"id": "g1", "pub_key": "`+pk+`"},
 			{"id": "g2", "pub_key": "`+pk+`"}
@@ -85,6 +108,7 @@ func TestLoad_RejectsWrongGuardianCount(t *testing.T) {
 func TestLoad_RejectsInvalidPubKey(t *testing.T) {
 	path := writeConfig(t, `{
 		"relay_url": "https://relay.example.com",
+		"post_token": "shared-secret-token",
 		"guardians": [
 			{"id": "g1", "pub_key": "not-valid-base64!!"},
 			{"id": "g2", "pub_key": "aGVsbG8="},
@@ -101,6 +125,7 @@ func TestLoad_RejectsDuplicateGuardianIDs(t *testing.T) {
 	pk := validPubKeyBase64()
 	path := writeConfig(t, `{
 		"relay_url": "https://relay.example.com",
+		"post_token": "shared-secret-token",
 		"guardians": [
 			{"id": "same-id", "pub_key": "`+pk+`"},
 			{"id": "same-id", "pub_key": "`+pk+`"},
@@ -135,6 +160,7 @@ func TestLoad_PubKeyBytesDecodedCorrectly(t *testing.T) {
 
 	path := writeConfig(t, `{
 		"relay_url": "https://relay.example.com",
+		"post_token": "shared-secret-token",
 		"guardians": [
 			{"id": "g1", "pub_key": "`+pk+`"},
 			{"id": "g2", "pub_key": "`+pk+`"},

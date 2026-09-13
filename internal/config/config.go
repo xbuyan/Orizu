@@ -1,7 +1,8 @@
-// Package config loads Orizu's local configuration: the relay's URL and
-// the three guardians' identities and public keys. This is deliberately a
-// single flat JSON file rather than flags or environment variables, since
-// it doesn't change often and is easier to review/back up as one artifact.
+// Package config loads Orizu's local configuration: the relay's URL, the
+// shared POST authentication token, and the three guardians' identities
+// and public keys. This is deliberately a single flat JSON file rather
+// than flags or environment variables, since it doesn't change often and
+// is easier to review/back up as one artifact.
 package config
 
 import (
@@ -33,20 +34,23 @@ type guardianJSON struct {
 // Config is Orizu's local configuration.
 type Config struct {
 	RelayURL  string     `json:"relay_url"`
+	PostToken string     `json:"-"`
 	Guardians []Guardian `json:"-"`
 }
 
 type configJSON struct {
 	RelayURL  string         `json:"relay_url"`
+	PostToken string         `json:"post_token"`
 	Guardians []guardianJSON `json:"guardians"`
 }
 
 // Sentinel errors returned by this package.
 var (
-	ErrMissingRelayURL   = errors.New("config: relay_url must not be empty")
+	ErrMissingRelayURL    = errors.New("config: relay_url must not be empty")
+	ErrMissingPostToken   = errors.New("config: post_token must not be empty — required to authenticate with the relay, see relay.Server's package doc")
 	ErrWrongGuardianCount = fmt.Errorf("config: exactly %d guardians are required", GuardianCount)
-	ErrInvalidPubKey     = errors.New("config: guardian public key must be 32 bytes, base64-encoded")
-	ErrDuplicateGuardian = errors.New("config: guardian ids must be unique")
+	ErrInvalidPubKey      = errors.New("config: guardian public key must be 32 bytes, base64-encoded")
+	ErrDuplicateGuardian  = errors.New("config: guardian ids must be unique")
 )
 
 // Load reads and validates a Config from path.
@@ -63,6 +67,9 @@ func Load(path string) (*Config, error) {
 
 	if raw.RelayURL == "" {
 		return nil, ErrMissingRelayURL
+	}
+	if raw.PostToken == "" {
+		return nil, ErrMissingPostToken
 	}
 	if len(raw.Guardians) != GuardianCount {
 		return nil, ErrWrongGuardianCount
@@ -86,6 +93,6 @@ func Load(path string) (*Config, error) {
 		guardians[i] = Guardian{ID: g.ID, PubKey: pubKey}
 	}
 
-	return &Config{RelayURL: raw.RelayURL, Guardians: guardians}, nil
+	return &Config{RelayURL: raw.RelayURL, PostToken: raw.PostToken, Guardians: guardians}, nil
 }
 
