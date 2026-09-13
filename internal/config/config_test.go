@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,6 +175,58 @@ func TestLoad_PubKeyBytesDecodedCorrectly(t *testing.T) {
 	}
 	if cfg.Guardians[0].PubKey != expected {
 		t.Errorf("pub key bytes did not decode correctly: got %v, want %v", cfg.Guardians[0].PubKey, expected)
+	}
+}
+
+func TestFingerprint_IsDeterministic(t *testing.T) {
+	var key [32]byte
+	for i := range key {
+		key[i] = byte(i)
+	}
+	fp1 := Fingerprint(key)
+	fp2 := Fingerprint(key)
+	if fp1 != fp2 {
+		t.Fatalf("expected deterministic fingerprint, got %q and %q", fp1, fp2)
+	}
+}
+
+func TestFingerprint_DiffersForDifferentKeys(t *testing.T) {
+	var key1, key2 [32]byte
+	for i := range key1 {
+		key1[i] = byte(i)
+		key2[i] = byte(i + 1)
+	}
+	fp1 := Fingerprint(key1)
+	fp2 := Fingerprint(key2)
+	if fp1 == fp2 {
+		t.Fatal("expected different keys to produce different fingerprints")
+	}
+}
+
+func TestFingerprint_HasReadableGroupedFormat(t *testing.T) {
+	var key [32]byte
+	fp := Fingerprint(key)
+
+	groups := strings.Split(fp, " ")
+	if len(groups) != 8 {
+		t.Fatalf("expected 8 groups, got %d: %q", len(groups), fp)
+	}
+	for _, g := range groups {
+		if len(g) != 4 {
+			t.Fatalf("expected each group to be 4 characters, got %q in %q", g, fp)
+		}
+	}
+}
+
+func TestGuardian_FingerprintMethodMatchesPackageFunction(t *testing.T) {
+	var key [32]byte
+	for i := range key {
+		key[i] = byte(i * 3)
+	}
+	g := Guardian{ID: "test-guardian", PubKey: key}
+
+	if g.Fingerprint() != Fingerprint(key) {
+		t.Fatalf("Guardian.Fingerprint() = %q, want %q", g.Fingerprint(), Fingerprint(key))
 	}
 }
 

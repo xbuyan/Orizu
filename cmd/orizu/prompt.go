@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
 
 	"golang.org/x/term"
 )
@@ -49,5 +50,20 @@ func promptHidden(label string) (string, error) {
 		line = line[:len(line)-1]
 	}
 	return line, nil
+}
+
+// promptVisible reads a line of plain (non-secret) input, echoed
+// normally — used for confirmations like the fingerprint-verification
+// gate in distribute.go, where there's nothing to hide. Shares the same
+// stdinReader as promptHidden's fallback path, for the same reason: a
+// fresh bufio.Reader per call can silently lose buffered input when a
+// command issues multiple prompts (see stdinReader's doc comment above).
+func promptVisible(label string) (string, error) {
+	fmt.Fprint(os.Stderr, label)
+	line, err := stdinReader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("reading input: %w", err)
+	}
+	return strings.TrimSpace(line), nil
 }
 

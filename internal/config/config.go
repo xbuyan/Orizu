@@ -6,11 +6,14 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // GuardianCount is fixed at the project's 3-of-3 threshold decision. A
@@ -94,5 +97,36 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &Config{RelayURL: raw.RelayURL, PostToken: raw.PostToken, Guardians: guardians}, nil
+}
+
+// Fingerprint computes a short, human-comparable representation of a
+// public key: the first 16 bytes of its SHA-256 hash, formatted as 8
+// groups of 4 uppercase hex characters.
+//
+// This exists because guardian public-key exchange is, and fundamentally
+// has to be, trust-on-first-use — there is no code-level fix for a
+// substituted key exchanged over a compromised channel. What every
+// mature system facing this same problem actually does (SSH host keys,
+// Signal's safety numbers, PGP fingerprints) is give both parties a
+// short value they can read aloud and compare over an independent
+// channel, so a substitution is at least detectable rather than silent.
+// This is that value for Orizu. See cmd/orizu/distribute.go, which
+// requires the owner to explicitly confirm they've done this comparison
+// before shares are ever sent.
+func Fingerprint(pubKey [32]byte) string {
+	sum := sha256.Sum256(pubKey[:])
+	hexStr := strings.ToUpper(hex.EncodeToString(sum[:16]))
+
+	var groups []string
+	for i := 0; i < len(hexStr); i += 4 {
+		groups = append(groups, hexStr[i:i+4])
+	}
+	return strings.Join(groups, " ")
+}
+
+// Fingerprint returns this guardian's public-key fingerprint — see the
+// package-level Fingerprint function.
+func (g Guardian) Fingerprint() string {
+	return Fingerprint(g.PubKey)
 }
 

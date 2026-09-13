@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/xbuyan/orizu/internal/config"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -63,11 +64,20 @@ func runKeygen() error {
 		return err
 	}
 
+	fingerprint := config.Fingerprint(*pub)
+
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Key generated and saved.")
-	fmt.Fprintln(os.Stderr, "Give the owner BOTH of these values (public key only — never the private key):")
+	fmt.Fprintln(os.Stderr, "Give the owner these THREE values (never the private key):")
 	fmt.Fprintln(os.Stderr, "  Guardian ID:", id)
 	fmt.Fprintln(os.Stderr, "  Public key: ", kf.PubKey)
+	fmt.Fprintln(os.Stderr, "  Fingerprint:", fingerprint)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "IMPORTANT: after the owner adds you to their config, they should read the")
+	fmt.Fprintln(os.Stderr, "fingerprint back to you (ideally over a DIFFERENT channel than however you")
+	fmt.Fprintln(os.Stderr, "sent it — e.g. a phone call if you sent it by text). If it doesn't match")
+	fmt.Fprintln(os.Stderr, "exactly, do not proceed — your public key may have been intercepted and")
+	fmt.Fprintln(os.Stderr, "substituted in transit.")
 	return nil
 }
 

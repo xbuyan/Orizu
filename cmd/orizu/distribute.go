@@ -36,6 +36,42 @@ type distributionMarker struct {
 	GuardianIDs   []string  `json:"guardian_ids"`
 }
 
+// confirmGuardianFingerprints prints each configured guardian's public-key
+// fingerprint and requires the owner to explicitly type "yes" before
+// proceeding — see config.Fingerprint's doc comment for why fingerprint
+// verification exists at all (guardian key exchange is fundamentally
+// trust-on-first-use, and this is the standard mitigation mature systems
+// use for that exact problem).
+//
+// This is a real, enforced gate, not just documentation advice sitting in
+// a README that's easy to skip: refusing anything other than an exact
+// "yes" means the owner cannot proceed to actually splitting and sending
+// the private key without at least being forced to look at each
+// fingerprint first. It does not, and cannot, guarantee the owner
+// actually called each guardian to compare — that step still depends on
+// the owner following through — but it removes the "I forgot" failure
+// mode of a purely informational suggestion.
+func confirmGuardianFingerprints(cfg *config.Config) error {
+	fmt.Println("Before shares are generated and sent, verify each guardian's fingerprint")
+	fmt.Println("with them independently (e.g. read it aloud on a call) — this is the only")
+	fmt.Println("real defense against a substituted public key. See each guardian's own")
+	fmt.Println("`orizu-guardian keygen` output for the fingerprint they should have told you.")
+	fmt.Println()
+	for _, g := range cfg.Guardians {
+		fmt.Printf("  %s: %s\n", g.ID, g.Fingerprint())
+	}
+	fmt.Println()
+
+	confirmation, err := promptVisible("Type 'yes' to confirm you have verified ALL THREE fingerprints: ")
+	if err != nil {
+		return err
+	}
+	if confirmation != "yes" {
+		return fmt.Errorf("fingerprint verification not confirmed — aborting before any shares were generated or sent")
+	}
+	return nil
+}
+
 // evidencePubKeyPath returns the path where the owner's evidence
 // encryption public key is stored — the ONE piece of key material this
 // command persists. It's safe to keep openly: encrypting to a public key
@@ -88,6 +124,10 @@ func runDistribute() error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading guardian config: %w", err)
+	}
+
+	if err := confirmGuardianFingerprints(cfg); err != nil {
+		return err
 	}
 
 	pubKey, privKey, err := box.GenerateKey(rand.Reader)
